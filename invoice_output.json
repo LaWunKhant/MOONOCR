@@ -1,0 +1,23 @@
+{
+  "invoice_number": "20250304-1",
+  "invoice_date": "202502/021",
+  "due_date": "",
+  "vendor_name": "",
+  "total_amount": "110,000",
+  "line_items": [
+    {
+      "description": "T1234124123",
+      "unit_price": "1010031",
+      "quantity": "1",
+      "unit": "",
+      "amount": "20250304-1"
+    },
+    {
+      "description": "****",
+      "unit_price": "",
+      "quantity": "10",
+      "unit": "",
+      "amount": "100,000"
+    }
+  ]
+}

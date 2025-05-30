@@ -1,0 +1,63 @@
+import re
+from transformers import DonutProcessor, VisionEncoderDecoderModel
+from PIL import Image
+import json
+import torch
+
+# 1. Load a pre-trained Donut model and processor
+# The transformers library should now automatically use the token
+# you logged in with via huggingface-cli login
+processor = DonutProcessor.from_pretrained("naver-clova-ix/donut-base-finetuned-v2")
+model = VisionEncoderDecoderModel.from_pretrained("naver-clova-ix/donut-base-finetuned-v2")
+
+# Optional: Move model to GPU if available (makes processing faster)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model.to(device)
+
+# 2. Load your image
+# Replace 'photo/download20250529.png' with the actual path to your image file.
+# Ensure this is an IMAGE file (like .png or .jpg), not a PDF.
+try:
+    # Assuming you have an IMAGE file named download20250529.png or similar
+    # inside the 'photo' directory. Adjust the filename and extension if needed.
+    image_path = 'photo/download20250529.png' # <--- IMPORTANT: Check this path and filename/extension
+    image = Image.open(image_path).convert("RGB")
+except FileNotFoundError:
+    print(f"Error: Image file not found at {image_path}")
+    print("Please make sure the image file is in the correct location and the path is correct.")
+    print("Also, ensure it's an image file (.png, .jpg, etc.), not a PDF.")
+    exit()
+
+
+# 3. Prepare the image for the model
+pixel_values = processor(image, return_tensors="pt").pixel_values
+pixel_values = pixel_values.to(device)
+
+# 4. Run the image through the model to get the output sequence
+outputs = model.generate(
+    pixel_values,
+    max_length=768,
+    early_stopping=True,
+    repetition_penalty=1.0,
+    use_cache=True,
+    num_beams=1,
+    bad_words_ids=[[processor.tokenizer.unk_token_id]],
+    pad_token_id=processor.tokenizer.pad_token_id,
+    eos_token_id=processor.tokenizer.eos_token_id,
+)
+
+# 5. Decode the output tokens and convert to JSON-like structure
+sequence = processor.batch_decode(outputs, skip_special_tokens=True)[0]
+sequence = sequence.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")
+
+# Use the token2json method to parse the output sequence
+try:
+    parsed_output = processor.token2json(sequence)
+except Exception as e:
+    print(f"Error parsing output sequence to JSON: {e}")
+    print(f"Raw sequence output: {sequence}")
+    parsed_output = {"raw_output": sequence, "error": str(e)}
+
+
+# 6. Print the resulting dictionary
+print(json.dumps(parsed_output, indent=2, ensure_ascii=False))

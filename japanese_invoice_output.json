@@ -1,0 +1,37 @@
+{
+  "invoice_number": "20250130-1",
+  "invoice_date": "2025/01/01",
+  "due_date": "2025年01月30日",
+  "vendor_name": "太郎株式会社",
+  "total_amount": "554,950",
+  "line_items": [
+    {
+      "description": "トマト",
+      "unit_price": "50,000",
+      "quantity": "10",
+      "unit": "パック",
+      "amount": "500,000"
+    },
+    {
+      "description": "たまこ",
+      "unit_price": "1,000",
+      "quantity": "1",
+      "unit": null,
+      "amount": "1,000"
+    },
+    {
+      "description": "あいうえお",
+      "unit_price": "2,000",
+      "quantity": "1",
+      "unit": null,
+      "amount": "2,000"
+    },
+    {
+      "description": "親子井",
+      "unit_price": "1,500",
+      "quantity": "1",
+      "unit": null,
+      "amount": "1,500"
+    }
+  ]
+}
