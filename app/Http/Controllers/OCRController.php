@@ -61,7 +61,9 @@ class OCRController extends Controller
                 // Delete the temporary uploaded file after successful processing
                 Storage::delete($filePath);
 
-                return redirect()->back()->with('success', 'Document processed successfully!')->with('ocr_data', $jsonOutput['extracted_text']);
+                // >>> THIS IS THE CORRECT RETURN STATEMENT <<<
+                return redirect()->back()->with('success', 'Document processed successfully!')
+                    ->with('ocr_parsed_data', $jsonOutput); // Pass the entire parsed data
             } else {
                 // Delete the temporary uploaded file even on JSON error
                 Storage::delete($filePath);
@@ -97,5 +99,5 @@ class OCRController extends Controller
 
             return redirect()->back()->with('error', 'An unexpected error occurred: '.$e->getMessage());
         }
-    }
-}
+    } // End of processDocument method
+} // End of OCRController class
