@@ -215,7 +215,9 @@ def parse_japanese_invoice(extracted_text):
             r'小計\s*[\d,]+(?:.\d{1,2})?\s*消費税\s*[\d,]+(?:.\d{1,2})?\s*合計\s*([\d,]+(?:.\d{1,2})?)'
         ],
         'account_holder': [
-            r'(?:普通\s*\d{6,8}\s*)([^\s]+)', r'口座名義[:：]?\s*([^\s]+)', r'名義[:：]?\s*([^\s]+)'
+            r'(?:普通\s*\d{6,8}\s*)([^\s]+(?:\s+[^\s]+)*)', 
+            r'口座名義[:：]?\s*([^\s]+(?:\s+[^\s]+)*)',
+            r'名義[:：]?\s*([^\s]+(?:\s+[^\s]+)*)'
         ]
     }
     for field, pattern_list in patterns.items():

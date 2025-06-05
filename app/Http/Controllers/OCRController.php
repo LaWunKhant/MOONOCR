@@ -33,9 +33,9 @@ class OCRController extends Controller
         // Option 1: Generic (if python3 is in PATH for the web server user)
         // $pythonExecutable = 'python3';
         // Option 2: From .env (Recommended for flexibility)
-        // $pythonExecutable = env('PYTHON_EXECUTABLE', 'python3');
+        $pythonExecutable = env('OCR_PYTHON_EXECUTABLE', 'python3');
         // Option 3: Your local specific path (ONLY for local dev, update for server)
-        $pythonExecutable = '/Users/cipc-002/easyocr-env/bin/python3';
+        // $pythonExecutable = env('OCR_PYTHON_EXECUTABLE', '/Users/cipc-002/easyocr-env/bin/python3');
         // FOR THIS EXAMPLE, let's assume a generic 'python3' or your specific path if testing locally.
         // Ensure the selected Python environment has all dependencies (easyocr, torch, pdf2image, Pillow, Poppler)
 
