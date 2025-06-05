@@ -1,338 +1,344 @@
-import sys
-import json
 import os
-import easyocr
-from PIL import Image
-from pdf2image import convert_from_path
-import numpy as np
+import json
 import re
 import time
+import warnings
+from pathlib import Path
+from pdf2image import convert_from_path # Ensure Poppler is installed and in PATH
+from PIL import Image
+import torch
+import sys
+import tempfile
 
-# Set the path to the Poppler bin directory
-# Ensure this path is correct for your installation
-POPPLER_PATH = r'/opt/homebrew/opt/poppler/bin' 
+# Suppress warnings from libraries like urllib3
+warnings.filterwarnings("ignore", category=UserWarning, module='urllib3')
 
-def process_document(file_path):
+# Check if EasyOCR is available
+try:
+    import easyocr
+    EASY_AVAILABLE = True
+except ImportError:
+    EASY_AVAILABLE = False
+    # This error will be handled in __main__ by printing JSON and exiting
+
+# Global EasyOCR reader instance
+READER = None
+# Global variable to store the path of the temporary image if one is created by prepare_image
+_TEMP_IMAGE_PATH_FOR_CLEANUP = None
+
+def initialize_ocr():
+    """Initializes the EasyOCR reader, trying to use GPU if available."""
+    global READER
+    if READER is None and EASY_AVAILABLE:
+        use_gpu = torch.cuda.is_available()
+        READER = easyocr.Reader(['ja', 'en'], gpu=use_gpu, verbose=False)
+
+def prepare_image(input_file_path_str):
     """
-    Processes a PDF or image file using EasyOCR with detail=1.
-    Returns a list of (bbox, text, confidence) tuples.
+    Converts a PDF to a temporary PNG image, or returns the path if the input is already an image.
+    Crucial for EasyOCR to process PDFs. Temporary PNGs are created in the system's temp directory.
     """
-    try:
-        reader = easyocr.Reader(['en', 'ja'], gpu=True, verbose=False) 
-    except Exception as e:
-         print(f"Error initializing EasyOCR reader: {e}", file=sys.stderr)
-         return None
+    global _TEMP_IMAGE_PATH_FOR_CLEANUP
+    _TEMP_IMAGE_PATH_FOR_CLEANUP = None # Reset for each call
 
-    file_extension = os.path.splitext(file_path)[1].lower()
-    images = []
-    
-    if file_extension == '.pdf':
+    input_file_p_obj = Path(input_file_path_str)
+    if not input_file_p_obj.exists():
+        raise FileNotFoundError(f"Input file not found: {input_file_p_obj}")
+
+    if input_file_p_obj.suffix.lower() == '.pdf':
         try:
-            if not os.path.exists(POPPLER_PATH):
-                 print(f"Error: Poppler path not found at {POPPLER_PATH}", file=sys.stderr)
-                 return None
-            images = convert_from_path(file_path, dpi=300, poppler_path=POPPLER_PATH, thread_count=2)
+            images = convert_from_path(input_file_p_obj, dpi=150, first_page=1, last_page=1)
         except Exception as e:
-            print(f"Error converting PDF to image: {e}", file=sys.stderr)
-            return None
-    elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
-        try:
-            images.append(Image.open(file_path))
-        except Exception as e:
-            print(f"Error opening image file: {e}", file=sys.stderr)
-            return None
+            # Detailed error message for Poppler issues
+            poppler_msg = "Ensure Poppler is installed and its 'bin' directory is in your system's PATH."
+            raise RuntimeError(f"Failed to convert PDF '{input_file_p_obj.name}'. {poppler_msg} Original error: {e}")
+
+        if images:
+            img = images[0].convert('RGB')
+            # Create a temporary file for the image
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                temp_image_path = tmp_file.name
+            _TEMP_IMAGE_PATH_FOR_CLEANUP = temp_image_path # Store for cleanup
+            img.save(temp_image_path, 'PNG', optimize=True)
+            return temp_image_path # Return path to the new temp image
+        else:
+            raise ValueError(f"No pages found in PDF: {input_file_p_obj.name}")
     else:
-        print(f"Error: Unsupported file type: {file_extension}", file=sys.stderr)
-        return None
+        # If not a PDF, use the original path directly
+        return str(input_file_p_obj)
 
-    if not images:
-        print("Error: No images processed.", file=sys.stderr)
-        return None
+def extract_with_easyocr(image_path_to_ocr):
+    """Performs OCR extraction on the given image path using the initialized EasyOCR reader."""
+    if not EASY_AVAILABLE or READER is None:
+        # This case should ideally be caught before calling, e.g., in initialize_ocr or main
+        raise RuntimeError("EasyOCR is not available or not initialized.")
 
-    all_ocr_results = []
-    for i, image in enumerate(images):
-        try:
-            numpy_image = np.array(image.convert('RGB'))
-            results = reader.readtext(numpy_image, detail=1)
-            all_ocr_results.extend(results)
-        except Exception as e:
-            print(f"Error running OCR on image {i}: {e}", file=sys.stderr)
-            pass
-
-    if all_ocr_results:
-        all_ocr_results.sort(key=lambda r: (r[0][0][1], r[0][0][0]) if r and len(r) > 0 and len(r[0]) > 0 and len(r[0][0]) > 1 else (0, 0))
-
-    return all_ocr_results
-
-# --- extract_line_items Function (Placeholder - REPLACE WITH YOUR ACTUAL LOGIC) ---
-def extract_line_items(ocr_results, full_text, invoice_data):
-    """
-    PLACEHOLDER: This function should contain your actual logic to parse
-    line items from the ocr_results. For now, it returns a hardcoded list.
-
-    You will replace this with your real implementation.
-    """
-    # This hardcoded list ensures the patch_if_short_total function receives data.
-    # Replace this with your actual line item extraction logic.
+    results = READER.readtext(
+        image_path_to_ocr, detail=1, paragraph=False,
+        width_ths=0.7, height_ths=0.7, batch_size=1
+    )
     return [
-        {"description": "トマト", "amount": "500,000", "unit_price": "50,000", "quantity": 10, "unit": "パック"},
-        {"description": "たまこ", "amount": "1,000", "unit_price": "1,000", "quantity": 1, "unit": None},
-        {"description": "あいうえお", "amount": "2,000", "unit_price": "2,000", "quantity": 1, "unit": None},
-        {"description": "親子丼", "amount": "1,500", "unit_price": "1,500", "quantity": 1, "unit": None}
+        {'text': text, 'confidence': confidence, 'bbox': bbox}
+        for bbox, text, confidence in results if confidence > 0.3
     ]
 
-# --- extract_total_amount Function (Cleaned) ---
-def extract_total_amount(ocr_results, line_items=None):
-    # Imports moved inside function for self-containment if this function were standalone,
-    # but for a full script, they are typically at the top. Keeping them here as per prior pattern.
-    import re
-    # import sys # Removed as debug prints are gone
+def clean_amount(amount_str):
+    if not amount_str:
+        return None
+    cleaned = re.sub(r'[半#¥￥\s]', '', str(amount_str))
+    cleaned = re.sub(r'[^\d,.]', '', cleaned)
+    if re.match(r'^\d{7,}$', cleaned.replace(',', '')) and cleaned.startswith('1') and ',' in cleaned:
+        cleaned = cleaned[1:]
+    return cleaned if cleaned else None
 
-    def smart_ocr_clean(text):
-        text = text.replace("半", "¥")
-        return re.sub(r'[^\d,.\¥]', '', text)
+def parse_japanese_invoice(extracted_text):
+    def parse_line_items_logic():
+        line_items = []
+        skip_terms_general = [
+            '請求書番号', '請求日', 'お支払期限', '振込先', '小計', '消費税', '合計',
+            'INVOICE', 'TEL:', '登録番号', '東京都', '御中', '様', '担当者',
+            '備考', 'りそな銀行', '秋葉原支店', '普通', '下記のとおり', 'ご請求金額',
+            '年', '月', '日', '消費税対象', '口座', '銀行', '振込手数料',
+            '振込先銀行', '支店', '口座番号', '口座名義', '税抜金額', '税込み',
+            '商品コード', '伝票番号', '番号'
+        ]
+        column_headers = ['品目名', '商品名', 'サービス内容', '明細', '単価', '数量', '金額', '単位']
+        relevant_items = []
+        for item in extracted_text:
+            text = item['text'].strip()
+            if len(text) < 1 or text in ['-', '/', '\\', '|', '=', '_', '.', ':', ';', '(', ')', '#', '半', '¥', '￥']:
+                continue
+            if any(term in text for term in skip_terms_general):
+                continue
+            if text in column_headers:
+                continue
+            if re.match(r'^\d{4}[/-年]\d{1,2}[/-月]?\d{1,2}日?$', text) or re.match(r'^\d{1,2}:\d{2}$', text):
+                continue
+            relevant_items.append(item)
 
-    def patch_if_short_total(detected_total, line_items):
-        if not line_items:
-            return detected_total
-        try:
-            subtotal = sum([
-                int(item.get("amount", "0").replace(",", "").replace("¥", ""))
-                for item in line_items if "amount" in item
-            ])
-            if subtotal > 200000 and detected_total < 0.75 * subtotal:
-                subtotal_str = str(subtotal)
-                total_str = str(detected_total)
-                if len(subtotal_str) - len(total_str) == 1:
-                    patched = int(subtotal_str[0] + total_str)
-                    return patched
-        except Exception:
-            pass
-        return detected_total
+        relevant_items.sort(key=lambda x: x['bbox'][0][1])
+        rows = []
+        current_row_y_center = -1
+        row_vertical_tolerance = 15
+        for item in relevant_items:
+            item_y_center = (item['bbox'][0][1] + item['bbox'][2][1]) / 2
+            if not rows or abs(item_y_center - current_row_y_center) > row_vertical_tolerance:
+                rows.append([item])
+                current_row_y_center = item_y_center
+            else:
+                rows[-1].append(item)
+                all_y_centers = [(i['bbox'][0][1] + i['bbox'][2][1]) / 2 for i in rows[-1]]
+                current_row_y_center = sum(all_y_centers) / len(all_y_centers)
 
-    primary_keywords = ["合計", "ご請求金額"]
-    all_candidates = []
-    
-    for kw_bbox, kw_text, kw_conf in ocr_results:
-        cleaned_kw_text = kw_text.strip().lower()
-        if kw_conf < 0.5:
-            continue
-
-        if any(keyword in cleaned_kw_text for keyword in primary_keywords):
-            search_left = kw_bbox[1][0] - 10
-            search_right = kw_bbox[1][0] + 600
-            kw_height = kw_bbox[2][1] - kw_bbox[0][1]
-            vertical_tolerance = max(40, kw_height * 1.5)
-            search_top = kw_bbox[0][1] - vertical_tolerance
-            search_bottom = kw_bbox[2][1] + vertical_tolerance
-
-            for bbox, text, conf in ocr_results:
-                if conf < 0.3:
-                    continue
-
-                x0, y0 = bbox[0]
-                x2, y2 = bbox[2]
-                center_y = (y0 + y2) / 2
-
-                if search_left <= x0 <= search_right and search_top <= center_y <= search_bottom:
-                    original_text = text
-                    clean_text = smart_ocr_clean(original_text)
-                    has_currency_symbol = '¥' in original_text or '半' in original_text
-
-                    if re.search(r'\d', clean_text):
-                        amount_str = clean_text.replace('¥', '').replace(',', '')
-                        try:
-                            amount = int(float(amount_str))
-                            if amount > 100:
-                                all_candidates.append((amount, clean_text, conf, cleaned_kw_text, bbox[0][0], has_currency_symbol))
-                        except Exception:
-                            pass
-
-    if all_candidates:
-        sorted_candidates = sorted(
-            all_candidates,
-            key=lambda x: (
-                x[3] == "合計",
-                x[5],
-                x[2],
-                -x[4]
-            ),
-            reverse=True
-        )
-        best = sorted_candidates[0]
-        amount = best[0]
-        amount = patch_if_short_total(amount, line_items)
-        return "¥{:,.0f}".format(amount)
-
-    # Fallback logic
-    fallback_candidates = []
-    for bbox, text, conf in ocr_results:
-        if conf < 0.3:
-            continue
-        clean_text = smart_ocr_clean(text)
-        match = re.search(r'¥\s?[\d,]{4,}', clean_text)
-        if match:
-            num = match.group().replace('¥', '').replace(',', '').strip()
+        for row_items in rows:
+            row_items.sort(key=lambda x: x['bbox'][0][0])
+            description = []
+            numbers_in_row = []
+            unit = None
+            for item in row_items:
+                text = item['text'].strip()
+                if re.match(r'^[0-9,]+(\.[0-9]+)?$', text):
+                    numbers_in_row.append({'text': text, 'bbox': item['bbox']})
+                elif text in ['パック', 'kg', 'g', '個', '本', '枚', 'セット', '袋', '円', '式', '件', '個口']:
+                    unit = text
+                else:
+                    if not re.match(r'^[0-9\s#¥￥]+$', text) and text not in ['INVOICE', 'TEL']:
+                        description.append(text)
+            current_description = ' '.join(description).strip()
+            if not current_description and not numbers_in_row:
+                continue
+            if not current_description and len(numbers_in_row) < 2:
+                 continue
+            line_item = {
+                "description": current_description,
+                "unit_price": None,
+                "quantity": None,
+                "unit": unit,
+                "amount": None
+            }
+            cleaned_numbers = [clean_amount(n['text']) for n in numbers_in_row if clean_amount(n['text'])]
+            numeric_values = []
+            for num_str in cleaned_numbers:
+                try:
+                    numeric_values.append(float(num_str.replace(',', '')))
+                except ValueError:
+                    pass
+            if len(cleaned_numbers) >= 3:
+                line_item['unit_price'] = cleaned_numbers[0]
+                line_item['quantity'] = cleaned_numbers[1]
+                line_item['amount'] = cleaned_numbers[2]
+            elif len(cleaned_numbers) == 2:
+                if numeric_values and len(numeric_values) == 2 and numeric_values[0] < numeric_values[1] and numeric_values[0] < 1000:
+                    line_item['quantity'] = cleaned_numbers[0]
+                    line_item['amount'] = cleaned_numbers[1]
+                else:
+                    line_item['unit_price'] = cleaned_numbers[0]
+                    line_item['amount'] = cleaned_numbers[1]
+            elif len(cleaned_numbers) == 1:
+                line_item['amount'] = cleaned_numbers[0]
             try:
-                val = int(num)
-                if val > 100:
-                    fallback_candidates.append(val)
-            except Exception:
+                qty = float(line_item['quantity'].replace(',', '')) if line_item['quantity'] else None
+                u_price = float(line_item['unit_price'].replace(',', '')) if line_item['unit_price'] else None
+                amt = float(line_item['amount'].replace(',', '')) if line_item['amount'] else None
+                if qty and u_price and amt is None:
+                    line_item['amount'] = f"{qty * u_price:,.0f}"
+                elif qty and amt and u_price is None and qty > 0:
+                    unit_price_calc = amt / qty
+                    line_item['unit_price'] = f"{int(unit_price_calc):,}" if unit_price_calc.is_integer() else f"{unit_price_calc:,.2f}"
+                elif u_price and amt and qty is None and u_price > 0:
+                    quantity_calc = amt / u_price
+                    line_item['quantity'] = f"{int(quantity_calc):,}" if quantity_calc.is_integer() else f"{quantity_calc:,.2f}"
+            except (ValueError, ZeroDivisionError, TypeError): # Added TypeError for None.replace
                 pass
+            if line_item['description'] and (line_item['amount'] or line_item['unit_price'] or line_item['quantity']):
+                line_items.append(line_item)
+        return line_items
 
-    if fallback_candidates:
-        best_fallback = max(fallback_candidates)
-        best_fallback = patch_if_short_total(best_fallback, line_items)
-        return "¥{:,.0f}".format(best_fallback)
-
-    return None
-
-# --- extract_invoice_data Function (Cleaned and Corrected Order) ---
-def extract_invoice_data(ocr_results):
-    """
-    Extracts structured invoice data from EasyOCR results.
-    """
-    invoice_data = {
-        "invoice_number": None,
-        "invoice_date": None,
-        "due_date": None,
-        "vendor_name": None,
-        "total_amount": None,
-        "bank_name": None,
-        "branch_name": None,
-        "account_type": None,
-        "account_number": None,
-        "account_holder": None,
+    output = {
+        "invoice_number": None, "invoice_date": None, "due_date": None,
+        "vendor_name": None, "total_amount": None, "account_holder": None,
         "line_items": []
     }
-
-    full_text = " ".join([text for (bbox, text, confidence) in ocr_results])
-
+    all_text = ' '.join(item['text'] for item in extracted_text)
     patterns = {
-        "invoice_number": r'請求書番号\s*([\w-]+)',
-        "invoice_date": r'請求日\s*(\d{4}[/.-]\d{2}[/.-]\d{2})',
-        "due_date": r'お支払期限\s*(\d{4}年\d{1,2}月\d{1,2}日)',
-        "bank_name": r'振込先.*?((?:\w+銀行))',
-        "branch_name": r'振込先.*?(\w+支店)',
-        "account_type": r'振込先.*?(普通|当座)',
-        "account_number": r'振込先.*?(\d+)',
+        'invoice_number': [r'(\d{8}-\d+)', r'(?:請求書|INVOICE)\s*No\.?[:：]?\s*([A-Za-z0-9\-]+)',
+                           r'請求\s*書\s*番号[:：]?\s*([A-Za-z0-9\-]+)'],
+        'invoice_date': [r'(?:請求日|発行日)[:：]?\s*(\d{4}[/-年]\d{1,2}[/-月]?\d{1,2}日?)', r'(\d{4}/\d{1,2}/\d{1,2})'],
+        'due_date': [r'(?:お?支払期限|支払期限|支払期日)[:：]?\s*(\d{4}[/-年]\d{1,2}[/-月]?\d{1,2}日?)',
+                     r'(?:お?支払期限|支払期限|支払期日)\s+(\d{4}年\d{1,2}月\d{1,2}日)'],
+        'vendor_name': [r'([^\s]+株式会社)', r'([^\s]+合同会社)', r'([^\s]+会社)', r'([^\s]+Corp\.?)',
+                        r'([^\s]+Ltd\.?)', r'([^\s]+Co\.?,? ?Ltd\.?)', r'([^\s]+サービス)'],
+        'total_amount': [
+            r'(?:ご請求金額)[:：]?\s*[¥￥#]?\s*([\d,]+(?:\.\d{1,2})?)',
+            r'(?:合計|総計)[:：]?\s*[¥￥#]?\s*([\d,]+(?:\.\d{1,2})?)', # Added 総計
+            r'[¥￥#]?\s*(?:合計|ご請求金額|総額)?\s*([\d,]+(?:.\d{1,2})?)',
+            r'小計\s*[\d,]+(?:.\d{1,2})?\s*消費税\s*[\d,]+(?:.\d{1,2})?\s*合計\s*([\d,]+(?:.\d{1,2})?)'
+        ],
+        'account_holder': [
+            r'(?:普通\s*\d{6,8}\s*)([^\s]+)', r'口座名義[:：]?\s*([^\s]+)', r'名義[:：]?\s*([^\s]+)'
+        ]
     }
+    for field, pattern_list in patterns.items():
+        if output[field] is None:
+            for pattern in pattern_list:
+                match = re.search(pattern, all_text)
+                if match:
+                    value = match.group(match.lastindex or 1).strip()
+                    if field == 'total_amount': value = clean_amount(value)
+                    output[field] = value
+                    break
+    if not output['invoice_date'] or not output['due_date']:
+        date_matches = re.findall(r'(\d{4}[/-年]\d{1,2}[/-月]?\d{1,2}日?)', all_text)
+        if len(date_matches) >= 1 and not output['invoice_date']: output['invoice_date'] = date_matches[0]
+        if len(date_matches) >= 2 and not output['due_date']: output['due_date'] = date_matches[1]
+    try:
+        output['line_items'] = parse_line_items_logic()
+    except Exception: # pylint: disable=broad-except
+        # In case of unexpected error in line item parsing, keep it empty but don't crash
+        output['line_items'] = []
+    return output
 
-    for key, pattern in patterns.items():
-        match = re.search(pattern, full_text)
-        if match:
-            value = match.group(1).strip()
-            if key == "invoice_date":
-                value = re.sub(r'[-.]', '/', value)
-            invoice_data[key] = value
+# def validate_result(result): # Kept for potential direct debugging, but output goes to STDOUT.
+#     """Prints a validation summary of the extracted invoice data."""
+#     print("\n=== VALIDATION (for debugging) ===")
+#     if not result:
+#         print("❌ No data extracted.")
+#         return
+#     required = ['invoice_number', 'invoice_date', 'vendor_name']
+#     missing = [f for f in required if not result.get(f)]
+#     if missing: print(f"⚠️ Missing critical fields: {', '.join(missing)}")
+#     else: print("✅ All required fields present.")
+#     print(f"✅ Found {len(result.get('line_items', []))} line item(s)")
+#     print("=== END VALIDATION ===")
 
-    vendor_patterns = [
-        r'(?:〒\d{3}-\d{4}\s*)[^(\n]*?((?:株式会社|有限会社|合同会社|合資会社)\s*[^(\n\d]+?)(?:御中|様)?',
-        r'(\S+?(?:株式会社|有限会社|合同会社|合資会社))\s*(?:TEL|電話|FAX|〒)',
-        r'(\S+?(?:株式会社|有限会社|合同会社|合資会社))'
-    ]
-    
-    for pattern in vendor_patterns:
-        match = re.search(pattern, full_text, re.MULTILINE)
-        if match:
-            vendor_name = match.group(1).strip()
-            vendor_name = re.sub(r'\s*(御中|様)$', '', vendor_name)
-            invoice_data["vendor_name"] = vendor_name
-            break
+def process_japanese_invoice_fast(input_file_path_for_processing):
+    global _TEMP_IMAGE_PATH_FOR_CLEANUP
+    # start_time = time.time() # For debugging duration
 
-    # IMPORTANT: Extract line items BEFORE total amount
-    line_items = extract_line_items(ocr_results, full_text, invoice_data)
-    invoice_data["line_items"] = line_items
+    try:
+        initialize_ocr()
+        if not EASY_AVAILABLE or READER is None: # Double check after initialization attempt
+            raise RuntimeError("EasyOCR could not be initialized or is not available.")
 
-    invoice_data["total_amount"] = extract_total_amount(ocr_results, invoice_data.get("line_items"))
+        image_for_ocr_path = prepare_image(input_file_path_for_processing)
+        extracted_data = extract_with_easyocr(image_for_ocr_path)
 
-    if invoice_data["account_number"]:
-        account_number_text = invoice_data["account_number"]
-        account_number_bbox = None
+        if not extracted_data:
+            raise ValueError("OCR extraction failed or returned no text.")
 
-        for bbox, text, confidence in ocr_results:
-            if text.strip() == account_number_text and confidence > 0.7:
-                 account_number_bbox = bbox
-                 break
+        result = parse_japanese_invoice(extracted_data)
+        if not result: # Should always return a dict, but as a safeguard
+            raise ValueError("Invoice parsing failed to produce a result structure.")
 
-        if account_number_bbox:
-            an_x_right = account_number_bbox[1][0]
-            an_y_center = (account_number_bbox[0][1] + account_number_bbox[2][1]) / 2
+        # Primary output for Laravel: JSON to STDOUT
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result # Return for potential direct use if not called as script
 
-            search_left = an_x_right - 10
-            search_right = an_x_right + 350
-            search_top = an_y_center - 20
-            search_bottom = an_y_center + 20
-
-            holder_candidates = []
-            jp_char_pattern = re.compile(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]+')
-
-            for bbox, text, confidence in ocr_results:
-                block_y_center = (bbox[0][1] + bbox[2][1]) / 2
-
-                if (bbox[0][0] > search_left and
-                    bbox[0][0] < search_right and
-                    abs(block_y_center - an_y_center) < 25 and
-                    jp_char_pattern.search(text) and
-                    len(text.strip()) > 1 and
-                    confidence > 0.6):
-                    
-                    holder_candidates.append((bbox, text, confidence))
-
-            if holder_candidates:
-                holder_candidates.sort(key=lambda x: (x[0][0][0], -x[2]))
-                account_holder_text = holder_candidates[0][1].strip()
-                invoice_data["account_holder"] = account_holder_text
-
-    return invoice_data
-
-def run_extraction(file_path):
-    """
-    Main function to run the OCR and data extraction.
-    """
-    start_time = time.time()
-    
-    ocr_results = process_document(file_path)
-    if ocr_results is None:
-        return {
-            "status": "error",
-            "message": "Failed to process document through OCR or file format not supported.",
-            "file_path": file_path,
-            "timestamp": int(time.time())
+    except Exception as e: # pylint: disable=broad-except
+        error_output = {
+            "error": str(e),
+            "type": type(e).__name__
         }
-
-    invoice_data = extract_invoice_data(ocr_results) 
-    end_time = time.time()
-
-    return {
-        "status": "success",
-        "message": "Document processed successfully.",
-        "file_path": file_path,
-        "invoice_data": invoice_data,
-        "timestamp": int(end_time)
-    }
+        print(json.dumps(error_output, indent=2, ensure_ascii=False))
+        return None
+    finally:
+        if _TEMP_IMAGE_PATH_FOR_CLEANUP and Path(_TEMP_IMAGE_PATH_FOR_CLEANUP).exists():
+            try:
+                os.remove(_TEMP_IMAGE_PATH_FOR_CLEANUP)
+                # print(f"Cleaned up temp image: {_TEMP_IMAGE_PATH_FOR_CLEANUP}", file=sys.stderr) # Debug to stderr
+            except OSError:
+                # print(f"Error cleaning up temp file: {_TEMP_IMAGE_PATH_FOR_CLEANUP}", file=sys.stderr) # Debug to stderr
+                pass
+        # print(f"🕒 Total processing time: {time.time() - start_time:.2f} seconds", file=sys.stderr) # Debug to stderr
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(json.dumps({
-            "status": "error",
-            "message": "Usage: python script.py <path_to_invoice_file>"
-        }, indent=2, ensure_ascii=False), file=sys.stderr)
-        sys.stderr.flush()
+    if not EASY_AVAILABLE:
+        print(json.dumps({"error": "EasyOCR is NOT installed. Please install with: pip install easyocr"}, ensure_ascii=False))
         sys.exit(1)
 
-    input_file_path = sys.argv[1]
-    try:
-        result = run_extraction(input_file_path)
-        if result:
-           print(json.dumps(result, indent=2, ensure_ascii=False))
-           sys.stdout.flush()
-    except Exception as e:
-         print(json.dumps({
-            "status": "error",
-            "message": f"An unexpected error occurred during extraction: {e}",
-            "file_path": input_file_path,
-            "timestamp": int(time.time())
-         }, indent=2, ensure_ascii=False), file=sys.stderr)
-         sys.stderr.flush()
-         sys.exit(1)
+    current_script_dir = Path(__file__).parent
+    actual_input_file = None
+
+    if len(sys.argv) > 1:
+        cmd_line_path = Path(sys.argv[1])
+        # If path from cmd is relative, assume it's relative to current working directory
+        if not cmd_line_path.is_absolute():
+            cmd_line_path = Path.cwd() / cmd_line_path
+        
+        if not cmd_line_path.exists():
+            print(json.dumps({"error": f"Input file provided via command line not found: {cmd_line_path}"}, ensure_ascii=False))
+            sys.exit(1)
+        actual_input_file = str(cmd_line_path.resolve())
+    else:
+        # Fallback to default file in 'photo' folder (for easy local testing)
+        photo_dir = current_script_dir / 'photo'
+        # Look for common image/pdf types
+        possible_extensions = ['*.pdf', '*.png', '*.jpg', '*.jpeg']
+        found_files = []
+        for ext in possible_extensions:
+            found_files.extend(list(photo_dir.glob(ext)))
+        
+        if found_files:
+            actual_input_file = str(found_files[0].resolve())
+            # print(f"⚠️ No input file provided via command line. Using default: {actual_input_file}", file=sys.stderr)
+        else:
+            err_msg = {
+                "error": "No input file provided and no default file found.",
+                "details": f"Provide path as argument or place file in '{photo_dir}'."
+            }
+            print(json.dumps(err_msg, ensure_ascii=False))
+            sys.exit(1)
+
+    # Call the main processing function
+    final_result = process_japanese_invoice_fast(actual_input_file)
+
+    # Exit code for Laravel Process component
+    if final_result is None:
+        sys.exit(1)  # Indicate failure
+    else:
+        # Optional: Save JSON to a file for local debugging if needed
+        # debug_output_path = current_script_dir / "japanese_invoice_output_debug.json"
+        # with open(debug_output_path, "w", encoding="utf-8") as f:
+        #     json.dump(final_result, f, indent=2, ensure_ascii=False)
+        # print(f"Debug JSON saved to {debug_output_path}", file=sys.stderr)
+        sys.exit(0)  # Indicate success

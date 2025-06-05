@@ -3,231 +3,106 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document OCR Uploader</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <title>Upload Invoice for OCR</title>
+    {{-- Add some basic styling or link to your CSS --}}
     <style>
-        /* Optional: Add some custom styles for better readability/layout if needed */
-        .grid-cols-2 {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .grid-cols-3 {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-        .grid-cols-4 {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
+        body { font-family: sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        .alert { padding: 15px; margin-bottom: 20px; border: 1px solid transparent; border-radius: 4px; }
+        .alert-success { color: #155724; background-color: #d4edda; border-color: #c3e6cb; }
+        .alert-danger { color: #721c24; background-color: #f8d7da; border-color: #f5c6cb; }
+        .ocr-data { margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 4px; background-color: #f9f9f9; }
+        .ocr-data h3 { margin-top: 0; }
+        .ocr-data pre { background-color: #e9e9e9; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
     </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-    <div class="bg-white p-8 rounded-lg shadow-md w-full max-w-2xl"> {{-- Increased max-width for more fields --}}
-        <h1 class="text-2xl font-bold mb-6 text-center">Upload Document for OCR</h1>
+<body>
+    <div class="container">
+        <h1>Upload Japanese Invoice for OCR</h1>
 
+        {{-- Display Success Messages --}}
         @if (session('success'))
-            <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
-                <strong class="font-bold">Success!</strong>
-                <span class="block sm:inline">{{ session('success') }}</span>
-                {{-- Keep this commented out for now as per user request --}}
-                {{-- @if (session('ocr_parsed_data.extracted_text'))
-                    <div class="mt-2 text-sm text-gray-800 bg-green-50 p-2 rounded">
-                        <h3 class="font-semibold">Extracted Text (Raw):</h3>
-                        <pre class="whitespace-pre-wrap font-mono text-xs">{{ session('ocr_parsed_data.extracted_text') }}</pre>
-                    </div>
-                @endif --}}
+            <div class="alert alert-success">
+                {{ session('success') }}
             </div>
         @endif
 
+        {{-- Display Error Messages --}}
         @if (session('error'))
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-                <strong class="font-bold">Error!</strong>
-                <span class="block sm:inline">{{ session('error') }}</span>
+            <div class="alert alert-danger">
+                {{ session('error') }}
                 @if (session('raw_output'))
-                    <div class="mt-2 text-sm text-gray-800 bg-red-50 p-2 rounded">
-                        <h3 class="font-semibold">Raw Python Output:</h3>
-                        <pre class="whitespace-pre-wrap font-mono text-xs">{{ session('raw_output') }}</pre>
-                        <h3 class="font-semibold mt-2">Python Error Output (stderr):</h3>
-                        <pre class="whitespace-pre-wrap font-mono text-xs">{{ session('error_output') }}</pre>
-                    </div>
+                    <p><strong>Raw Output:</strong></p>
+                    <pre>{{ session('raw_output') }}</pre>
+                @endif
+                @if (session('error_output'))
+                    <p><strong>Error Output (stderr):</strong></p>
+                    <pre>{{ session('error_output') }}</pre>
                 @endif
             </div>
         @endif
 
-        @if ($errors->any())
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
-                <ul class="list-disc list-inside">
-                    @foreach ($errors->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
-        {{-- Keep this commented out for now as per user request --}}
-        {{-- @if (session('ocr_parsed_data'))
-            <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative mb-4">
-                <h3 class="font-bold mb-2">OCR Extracted Data (Raw JSON):</h3>
-                <pre class="whitespace-pre-wrap text-sm">{{ json_encode(session('ocr_parsed_data'), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
-            </div>
-        @endif --}}
-
-        <form action="{{ route('ocr.process') }}" method="POST" enctype="multipart/form-data" class="space-y-4 mb-8 p-6 bg-white shadow-md rounded-lg">
-            @csrf
+        {{-- File Upload Form --}}
+        <form action="{{ route('ocr.process') }}" method="POST" enctype="multipart/form-data">
+            @csrf {{-- CSRF Protection --}}
             <div>
-                <label for="document" class="block text-sm font-medium text-gray-700">Select Document (PDF, JPG, PNG, GIF)</label>
-                <input type="file" name="document" id="document" class="mt-1 block w-full text-sm text-gray-500
-                    file:mr-4 file:py-2 file:px-4
-                    file:rounded-md file:border-0
-                    file:text-sm file:font-semibold
-                    file:bg-indigo-50 file:text-indigo-700
-                    hover:file:bg-indigo-100"/>
+                <label for="document">Choose Document (PDF, JPG, PNG):</label><br>
+                <input type="file" id="document" name="document" accept=".pdf,.jpg,.jpeg,.png" required>
             </div>
-            <div>
-                <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                    Upload and Process
-                </button>
-            </div>
+            @error('document')
+                <div class="alert alert-danger" style="margin-top: 5px;">{{ $message }}</div>
+            @enderror
+            <br>
+            <button type="submit">Process Document</button>
         </form>
 
-        {{-- Display OCR parsed data in a form if available --}}
-        @if (session('ocr_parsed_data.invoice_data')) {{-- Only show if invoice_data exists --}}
-            <h2 class="text-xl font-bold mb-4 text-center">Invoice Details (Pre-filled by OCR)</h2>
-            <form action="/save-invoice-details" method="POST" class="space-y-4 p-6 bg-white shadow-md rounded-lg">
-                @csrf
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="invoice_number" class="block text-sm font-medium text-gray-700">Invoice Number:</label>
-                        <input type="text" name="invoice_number" id="invoice_number"
-                               value="{{ session('ocr_parsed_data.invoice_data.invoice_number') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label for="invoice_date" class="block text-sm font-medium text-gray-700">Invoice Date:</label>
-                        @php
-                            $invoiceDate = session('ocr_parsed_data.invoice_data.invoice_date');
-                            // Convert to YYYY-MM-DD for input type="date"
-                            if ($invoiceDate) {
-                                $invoiceDate = str_replace(['/', '年', '月', '日'], ['-', '-', '-', ''], $invoiceDate);
-                                try {
-                                    $carbonDate = \Carbon\Carbon::parse($invoiceDate);
-                                    $invoiceDate = $carbonDate->format('Y-m-d');
-                                } catch (Exception $e) {
-                                    $invoiceDate = ''; // Fallback if parsing fails
-                                }
-                            }
-                        @endphp
-                        <input type="date" name="invoice_date" id="invoice_date"
-                               value="{{ $invoiceDate ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div class="col-span-1 md:col-span-2"> {{-- Full width for vendor name --}}
-                        <label for="vendor_name" class="block text-sm font-medium text-gray-700">Vendor Name:</label>
-                        <input type="text" name="vendor_name" id="vendor_name"
-                               value="{{ session('ocr_parsed_data.invoice_data.vendor_name') ?? '' }}"
-                               placeholder="e.g., テスト太郎会社"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label for="total_amount" class="block text-sm font-medium text-gray-700">Total Amount (¥):</label>
-                        {{-- total_amount is now formatted by Python script as string with commas --}}
-                        <input type="text"
-                               name="total_amount"
-                               id="total_amount"
-                               value="{{ session('ocr_parsed_data.invoice_data.total_amount') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label for="due_date" class="block text-sm font-medium text-gray-700">Due Date:</label> {{-- Changed ID and Name --}}
-                        @php
-                            $dueDate = session('ocr_parsed_data.invoice_data.due_date'); // Changed session key
-                            // Convert YYYY年MM月DD日 to YYYY-MM-DD for input type="date"
-                            if ($dueDate) {
-                                $dueDate = str_replace(['年', '月', '日'], ['-', '-', ''], $dueDate);
-                                $dueDate = rtrim($dueDate, '-'); // Remove trailing hyphen if any
-                                try {
-                                    $carbonDate = \Carbon\Carbon::parse($dueDate);
-                                    $dueDate = $carbonDate->format('Y-m-d');
-                                } catch (Exception $e) {
-                                    $dueDate = ''; // Fallback if parsing fails
-                                }
-                            }
-                        @endphp
-                        <input type="date" name="due_date" id="due_date" {{-- Changed ID and Name --}}
-                               value="{{ $dueDate ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                </div>
+        {{-- Display Parsed OCR Data --}}
+        @if (session('ocr_parsed_data'))
+            <div class="ocr-data">
+                <h3>Extracted Invoice Information:</h3>
+                @php $data = session('ocr_parsed_data'); @endphp
 
-                <h3 class="text-lg font-bold mt-6 mb-2">Bank Details</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="bank_name" class="block text-sm font-medium text-gray-700">Bank Name:</label>
-                        <input type="text" name="bank_name" id="bank_name"
-                               value="{{ session('ocr_parsed_data.invoice_data.bank_name') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label for="branch_name" class="block text-sm font-medium text-gray-700">Branch Name:</label>
-                        <input type="text" name="branch_name" id="branch_name"
-                               value="{{ session('ocr_parsed_data.invoice_data.branch_name') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label for="account_type" class="block text-sm font-medium text-gray-700">Account Type:</label>
-                        <input type="text" name="account_type" id="account_type"
-                               value="{{ session('ocr_parsed_data.invoice_data.account_type') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label for="account_number" class="block text-sm font-medium text-gray-700">Account Number:</label>
-                        <input type="text" name="account_number" id="account_number"
-                               value="{{ session('ocr_parsed_data.invoice_data.account_number') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                     <div class="col-span-1 md:col-span-2"> {{-- Full width for account holder --}}
-                        <label for="account_holder" class="block text-sm font-medium text-gray-700">Account Holder Name:</label>
-                        <input type="text" name="account_holder" id="account_holder"
-                               value="{{ session('ocr_parsed_data.invoice_data.account_holder') ?? '' }}"
-                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 focus:ring-indigo-500 focus:border-indigo-500"/>
-                    </div>
-                </div>
+                <p><strong>Invoice Number:</strong> {{ $data['invoice_number'] ?? 'N/A' }}</p>
+                <p><strong>Invoice Date:</strong> {{ $data['invoice_date'] ?? 'N/A' }}</p>
+                <p><strong>Due Date:</strong> {{ $data['due_date'] ?? 'N/A' }}</p>
+                <p><strong>Vendor Name:</strong> {{ $data['vendor_name'] ?? 'N/A' }}</p>
+                <p><strong>Total Amount:</strong> {{ $data['total_amount'] ?? 'N/A' }}</p>
+                <p><strong>Account Holder:</strong> {{ $data['account_holder'] ?? 'N/A' }}</p>
 
-                <h3 class="text-lg font-bold mt-6 mb-2">Line Items</h3>
-                @if (!empty(session('ocr_parsed_data.invoice_data.line_items')))
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full bg-white border border-gray-200 rounded-md shadow-sm">
-                            <thead>
+                @if (!empty($data['line_items']))
+                    <h4>Line Items:</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Description</th>
+                                <th>Unit Price</th>
+                                <th>Quantity</th>
+                                <th>Unit</th>
+                                <th>Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach ($data['line_items'] as $item)
                                 <tr>
-                                    <th class="px-4 py-2 border-b-2 border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Description</th>
-                                    <th class="px-4 py-2 border-b-2 border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Unit Price</th>
-                                    <th class="px-4 py-2 border-b-2 border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Quantity</th>
-                                    <th class="px-4 py-2 border-b-2 border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Unit</th>
-                                    <th class="px-4 py-2 border-b-2 border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Amount</th>
+                                    <td>{{ $item['description'] ?? 'N/A' }}</td>
+                                    <td>{{ $item['unit_price'] ?? 'N/A' }}</td>
+                                    <td>{{ $item['quantity'] ?? 'N/A' }}</td>
+                                    <td>{{ $item['unit'] ?? 'N/A' }}</td>
+                                    <td>{{ $item['amount'] ?? 'N/A' }}</td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (session('ocr_parsed_data.invoice_data.line_items') as $item)
-                                    <tr class="hover:bg-gray-50">
-                                        <td class="px-4 py-2 whitespace-normal text-sm text-gray-900">{{ $item['description'] ?? '' }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{{ $item['unit_price'] ?? '' }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{{ $item['quantity'] ?? '' }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{{ $item['unit'] ?? '' }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{{ $item['amount'] ?? '' }}</td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    </div>
+                            @endforeach
+                        </tbody>
+                    </table>
                 @else
-                    <p class="text-sm text-gray-600 mt-2">No line items extracted.</p>
+                    <p>No line items extracted.</p>
                 @endif
-
-                {{-- --- REMOVED LINE ITEMS TABLE AS PER USER REQUEST --- --}}
-
-                <button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 mt-6">
-                    Save Invoice Details
-                </button>
-
-
-            </form>
+                <hr>
+                <h4>Raw JSON Data:</h4>
+                <pre>{{ json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+            </div>
         @endif
     </div>
 </body>
